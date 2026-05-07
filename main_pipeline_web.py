@@ -191,24 +191,22 @@ def generate_fba_stats(input_folder: Path, output_excel_path: Path):
     print(f"✅ 统计完成，已生成: {output_excel_path.name}")
 
 # ==========================================
-# 模块 3 & 4 (完美融合版): 纯 Python 数据清洗与计算 (读取模板库)
+# 模块 3 & 4 (究极融合版): 纯 Python 双引擎匹配 (防错加强版)
 # ==========================================
 def process_data_pure_python(stats_file, mixed_file, template_file, output_path):
-    print("\n--- [3&4/6] 启动纯 Python 计算引擎 (展开混装 & 自动核算) ---")
+    print("\n--- [3&4/6] 启动纯 Python 计算引擎 (展开混装 & 双重匹配) ---")
     
-    # 1. 读取基础统计数据 (来自模块2)
+    # 1. 读取基础统计数据
     df_stats = pd.read_excel(stats_file, sheet_name='详细数据')
     
-    # 2. 读取混装映射 (从混装表中提取规则)
+    # 2. 读取混装映射
     mix_mapping = {}
     if mixed_file.exists():
-        # pandas 读取时跳过空行或表头，直接按照索引精确定位
         wb_mixed = pd.read_excel(mixed_file, sheet_name=1, header=None) 
-        skus = wb_mixed.iloc[5:14, 0].dropna().tolist() # 第6-14行是SKU列表 (索引5-13)
+        skus = wb_mixed.iloc[5:14, 0].dropna().tolist()
         
-        # 遍历列找混装代码
         for col_idx in range(1, wb_mixed.shape[1]):
-            code = wb_mixed.iloc[15, col_idx] # 第16行是代码 (索引15)
+            code = wb_mixed.iloc[15, col_idx]
             if pd.notna(code) and str(code).strip():
                 code_str = str(code).strip()
                 items = []
@@ -229,7 +227,6 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
             codes = [c.strip() for c in additional_data.split('、') if c.strip()]
             box_count = row.get('Count', 1)
             
-            # 找到匹配的混装规则
             matched_items = []
             for code in codes:
                 if code in mix_mapping:
@@ -252,21 +249,57 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
 
     df_expanded = pd.DataFrame(expanded_rows)
 
-    # 4. 核心：直接读取【模板文件】中的【商品管理】Sheet
-    print("正在读取《商品管理》资料库并进行 VLOOKUP 匹配...")
-    try:
-        df_master = pd.read_excel(template_file, sheet_name='商品管理')
-    except Exception as e:
-        raise ValueError(f"无法读取模板中的'商品管理'Sheet，请检查模板文件是否包含该Sheet！错误: {e}")
+    # ==========================================
+    # 🚀 核心一：读取【商品管理】匹配 SKU 资料
+    # ==========================================
+    print("正在读取《商品管理》资料库并进行智能匹配...")
+    df_master = pd.read_excel(template_file, sheet_name='商品管理')
 
-    # 智能对齐列名：如果商品管理表里的列名叫 'SKU'，自动重命名为 'SKU Name' 以便对接
-    if 'SKU' in df_master.columns and 'SKU Name' not in df_master.columns:
-        df_master = df_master.rename(columns={'SKU': 'SKU Name'})
+    # 暴力清除表头前后的隐藏空格，防止由于 Excel 输入不规范导致报错
+    df_master.columns = df_master.columns.astype(str).str.strip()
+    df_expanded.columns = df_expanded.columns.astype(str).str.strip()
 
-    # 左连接匹配数据 (纯粹的底层 VLOOKUP)
+    # 智能定位 SKU 列名
+    possible_sku_names = ['SKU Name', 'SKU', '商品货号', '货号', '商品SKU', 'ASIN', '商品编码']
+    master_sku_col = next((col for col in possible_sku_names if col in df_master.columns), None)
+
+    if master_sku_col is None:
+        raise ValueError(f"❌ 匹配失败！在《商品管理》中找不到SKU列。\n🤔 系统读到的表头是: {list(df_master.columns)}")
+    
+    if master_sku_col != 'SKU Name':
+        df_master = df_master.rename(columns={master_sku_col: 'SKU Name'})
+
+    # 第一次匹配：商品信息
     df_final = pd.merge(df_expanded, df_master, on='SKU Name', how='left')
 
-    # 5. 纯 Python 自动核算 (完美替代 Excel 的乘法公式)
+    # ==========================================
+    # 🚀 核心二：读取【FBA仓库代码表】匹配地址资料
+    # ==========================================
+    print("正在读取《FBA仓库代码表》匹配仓库地址...")
+    try:
+        df_warehouse = pd.read_excel(template_file, sheet_name='FBA仓库代码表')
+        df_warehouse.columns = df_warehouse.columns.astype(str).str.strip()
+
+        # 智能定位 仓库代码 列名
+        possible_wh_names = ['FBA Warehouse', 'FBA', '仓库代码', '仓库代码/FBA code', 'FBA Code', '目的仓']
+        master_wh_col = next((col for col in possible_wh_names if col in df_warehouse.columns), None)
+
+        if master_wh_col:
+            if master_wh_col != 'FBA Warehouse':
+                df_warehouse = df_warehouse.rename(columns={master_wh_col: 'FBA Warehouse'})
+            
+            # 去重：防止仓库表里有重复项导致数据行数翻倍
+            df_warehouse = df_warehouse.drop_duplicates(subset=['FBA Warehouse'])
+            # 第二次匹配：仓库信息
+            df_final = pd.merge(df_final, df_warehouse, on='FBA Warehouse', how='left')
+        else:
+            print(f"⚠️ 未找到仓库代码列，仓库表头为: {list(df_warehouse.columns)}")
+    except Exception as e:
+        print(f"⚠️ 《FBA仓库代码表》读取失败，部分地址信息将为空: {e}")
+
+    # ==========================================
+    # 纯 Python 自动核算 (数值固化)
+    # ==========================================
     df_final['单价'] = pd.to_numeric(df_final['单价'], errors='coerce').fillna(0)
     df_final['总价'] = df_final['总数'] * df_final['单价']
     
@@ -277,20 +310,21 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
     if '单个体积' in df_final.columns:
         df_final['体积'] = df_final['总数'] * pd.to_numeric(df_final['单个体积'], errors='coerce').fillna(0)
 
-    # 补充报关/推单需要的固定静态字段（如果这些本来就在商品管理表里，这段可以删掉）
-    df_final['国家编码'] = 'US'
-    df_final['货币编码'] = 'USD'
-    df_final['离境口岸'] = '深圳'     
-    df_final['起运港'] = 'SHENZHEN'  
-    df_final['境内货源地'] = '深圳'
+    # 兜底填充：如果商品或仓库表里没写这些字段，强制给定默认值
+    default_values = {
+        '国家编码': 'US', '货币编码': 'USD', 
+        '离境口岸': '深圳', '起运港': 'SHENZHEN', '境内货源地': '深圳'
+    }
+    for col, val in default_values.items():
+        if col not in df_final.columns:
+            df_final[col] = val
 
-    # 6. 导出最终底层表，供下游模块直接读取
+    # 导出底层表
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         df_final.to_excel(writer, index=False, sheet_name='明细')
         
     print(f"✅ 纯 Python 计算完成，已生成底层明细表: {output_path.name}")
     return df_final
-
 
 # ==========================================
 # 模块 5: 创建报关单（无公式，直接填充数值）
