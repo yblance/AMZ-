@@ -370,7 +370,7 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
         ws_inv['G8'] = parts[2] if len(parts) > 2 else ""
 
         # 填充发票明细行（直接数值）
-        for i in range(n):
+        for i in range(n-1):
             row = 13 + i
             ws_inv.cell(row=row, column=2, value=df_group.loc[i, '商品统称'] if '商品统称' in df_group else '')
             ws_inv.cell(row=row, column=4, value=df_group.loc[i, '总数'] if '总数' in df_group else 0)
@@ -383,8 +383,8 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
         total_row_inv = 12 + n
         # 合计行
         ws_inv.cell(row=total_row_inv, column=1, value="合计（TOTAL）")
-        ws_inv.cell(row=total_row_inv, column=4, value=f"=SUM(D13:D{12+n})")
-        ws_inv.cell(row=total_row_inv, column=7, value=f"=SUM(G13:G{12+n})")
+        ws_inv.cell(row=total_row_inv, column=4, value=f"=SUM(D13:D{12+n-1})")
+        ws_inv.cell(row=total_row_inv, column=7, value=f"=SUM(G13:G{12+n-1})")
         # 合并明细行第一列（不包含合计行）
         if n > 0:
             ws_inv.merge_cells(start_row=13, start_column=1, end_row=11+n, end_column=1)
@@ -396,7 +396,7 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
         # ---- 装箱单工作表 ----
         ws_pk = wb['装箱单']
         ws_pk['B10'] = df_group.loc[0, '仓库地址全'] if '仓库地址全' in df_group else ''
-        for i in range(n):
+        for i in range(n-1):
             row = 14 + i
             ws_pk.cell(row=row, column=2, value=df_group.loc[i, '商品统称'] if '商品统称' in df_group else '')
             ws_pk.cell(row=row, column=3, value=df_group.loc[i, '总数'] if '总数' in df_group else 0)
@@ -407,11 +407,11 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
 
         total_row_pk = 13 + n
         ws_pk.cell(row=total_row_pk, column=1, value="合计（TOTAL）")
-        ws_pk.cell(row=total_row_pk, column=3, value=f"=SUM(C14:C{13+n})")
+        ws_pk.cell(row=total_row_pk, column=3, value=f"=SUM(C14:C{13+n-1})")
         ws_pk.cell(row=total_row_pk, column=4, value="PCS")
-        ws_pk.cell(row=total_row_pk, column=5, value=f"=SUM(E14:E{13+n})")
-        ws_pk.cell(row=total_row_pk, column=6, value=f"=SUM(F14:F{13+n})")
-        ws_pk.cell(row=total_row_pk, column=7, value=f"=SUM(G14:G{13+n})")
+        ws_pk.cell(row=total_row_pk, column=5, value=f"=SUM(E14:E{13+n-1})")
+        ws_pk.cell(row=total_row_pk, column=6, value=f"=SUM(F14:F{13+n-1})")
+        ws_pk.cell(row=total_row_pk, column=7, value=f"=SUM(G14:G{13+n-1})")
         if n > 0:
             ws_pk.merge_cells(start_row=14, start_column=1, end_row=12+n, end_column=1)
         for r in range(12, total_row_pk + 1):
@@ -468,7 +468,7 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
         # 合并明细行第一列（不包含合计行）
         if n > 0:
             ws_ct.merge_cells(start_row=12, start_column=1, end_row=10+n, end_column=1)
-        for i in range(n):
+        for i in range(n-1):
             row = 12 + i
             ws_ct.cell(row=row, column=2, value=df_group.loc[i, '商品统称'] if '商品统称' in df_group else '')
             ws_ct.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
@@ -480,9 +480,9 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
         total_row_ct = 11 + n
         ws_ct.cell(row=total_row_ct, column=1, value="合计（TOTAL）")
         ws_ct.merge_cells(start_row=total_row_ct, start_column=1, end_row=total_row_ct, end_column=4)
-        ws_ct.cell(row=total_row_ct, column=5, value=f"=SUM(E12:E{11+n})")
+        ws_ct.cell(row=total_row_ct, column=5, value=f"=SUM(E12:E{11+n-1})")
         ws_ct.cell(row=total_row_ct, column=6, value="个")
-        ws_ct.cell(row=total_row_ct, column=8, value=f"=SUM(H12:H{11+n})")
+        ws_ct.cell(row=total_row_ct, column=8, value=f"=SUM(H12:H{11+n-1})")
 
         ws_ct.cell(row=total_row_ct+2, column=1, value="2. Payment Terms: T/T")
         ws_ct.cell(row=total_row_ct+3, column=1, value="3. Shipment: Prompt ")
