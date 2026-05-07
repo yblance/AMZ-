@@ -346,13 +346,11 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
         # ---- 发票工作表 ----
         ws_inv = wb['发票']
         ws_inv['G5'] = date_inv
-        # 取第一行的相关字段
         ws_inv['B7'] = df_group.loc[0, '离境口岸'] if '离境口岸' in df_group else ''
         ws_inv['B8'] = df_group.loc[0, '起运港'] if '起运港' in df_group else ''
         ws_inv['B9'] = df_group.loc[0, '目的地'] if '目的地' in df_group else ''
         ws_inv['C9'] = wh_code
         ws_inv['B10'] = df_group.loc[0, '英文目的地'] if '英文目的地' in df_group else ''
-        # 提取订单号
         file_name_full = str(df_group.loc[0, 'File Name'])
         parts = file_name_full.split('-')
         ws_inv['G8'] = parts[2] if len(parts) > 2 else ""
@@ -369,13 +367,14 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
             ws_inv.cell(row=row, column=7, value=total_qty * unit_price)
 
         total_row_inv = 12 + n
-        # 计算合计
-        sum_qty = f"=SUM(D13:D{12+n})"  # 这里保留公式，因为只是简单求和，且可以后续固化
-        sum_amount = f"=SUM(G13:G{12+n})"
+        # 合计行
         ws_inv.cell(row=total_row_inv, column=1, value="合计（TOTAL）")
-        ws_inv.cell(row=total_row_inv, column=4, value=sum_qty)
-        ws_inv.cell(row=total_row_inv, column=7, value=sum_amount)
-        ws_inv.merge_cells(start_row=13, start_column=1, end_row=12+n, end_column=1)
+        ws_inv.cell(row=total_row_inv, column=4, value=f"=SUM(D13:D{12+n})")
+        ws_inv.cell(row=total_row_inv, column=7, value=f"=SUM(G13:G{12+n})")
+        # 合并明细行第一列（不包含合计行）
+        if n > 0:
+            ws_inv.merge_cells(start_row=13, start_column=1, end_row=11+n, end_column=1)
+        # 应用边框
         for r in range(11, total_row_inv + 1):
             for c in range(1, 8):
                 ws_inv.cell(row=r, column=c).border = thin_border
@@ -399,7 +398,8 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
         ws_pk.cell(row=total_row_pk, column=5, value=f"=SUM(E14:E{13+n})")
         ws_pk.cell(row=total_row_pk, column=6, value=f"=SUM(F14:F{13+n})")
         ws_pk.cell(row=total_row_pk, column=7, value=f"=SUM(G14:G{13+n})")
-        ws_pk.merge_cells(start_row=14, start_column=1, end_row=13+n, end_column=1)
+        if n > 0:
+            ws_pk.merge_cells(start_row=14, start_column=1, end_row=12+n, end_column=1)
         for r in range(12, total_row_pk + 1):
             for c in range(1, 8):
                 ws_pk.cell(row=r, column=c).border = thin_border
@@ -408,11 +408,11 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
         ws_decl = wb['报关单']
         ws_decl['J3'] = date_decl
         ws_decl['J3'].alignment = Alignment(wrapText=True)
-        ws_decl['A7'] = ws_inv['G8'].value  # 直接取值
+        ws_decl['A7'] = ws_inv['G8'].value
         ws_decl['J7'] = ws_inv['B9'].value
         total_boxes = int(round(df_group['箱数'].sum(), 0)) if '箱数' in df_group else 0
         ws_decl['D9'] = total_boxes
-        ws_decl['F9'] = f"=装箱单!E{total_row_pk}"  # 公式，但后续可保留，因为用户下载后 Excel 可自动计算
+        ws_decl['F9'] = f"=装箱单!E{total_row_pk}"
         ws_decl['H9'] = f"=装箱单!F{total_row_pk}"
         ws_decl['A12'] = ws_inv['C9'].value
 
@@ -451,7 +451,9 @@ def generate_customs_docs(info_file_path: Path, template_file_path: Path, output
         # ---- 合同工作表 ----
         ws_ct = wb['合同']
         ws_ct['H4'] = date_inv
-        ws_ct.merge_cells(start_row=12, start_column=1, end_row=11+n, end_column=1)
+        # 合并明细行第一列（不包含合计行）
+        if n > 0:
+            ws_ct.merge_cells(start_row=12, start_column=1, end_row=10+n, end_column=1)
         for i in range(n):
             row = 12 + i
             ws_ct.cell(row=row, column=2, value=df_group.loc[i, '商品统称'] if '商品统称' in df_group else '')
