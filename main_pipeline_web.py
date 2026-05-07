@@ -189,12 +189,11 @@ def generate_fba_stats(input_folder: Path, output_excel_path: Path):
         new_df.to_excel(writer, index=False, sheet_name='详细数据', startcol=len(df.columns) + 1)
         warehouse_grouped.to_excel(writer, index=False, sheet_name='仓库统计')
     print(f"✅ 统计完成，已生成: {output_excel_path.name}")
-
 # ==========================================
-# 模块 3 & 4 (究极融合版): 纯 Python 双引擎匹配 (防错加强版)
+# 模块 3 & 4 (究极精准版): 纯 Python 双引擎匹配 
 # ==========================================
 def process_data_pure_python(stats_file, mixed_file, template_file, output_path):
-    print("\n--- [3&4/6] 启动纯 Python 计算引擎 (展开混装 & 双重匹配) ---")
+    print("\n--- [3&4/6] 启动纯 Python 计算引擎 (展开混装 & 精准双重匹配) ---")
     
     # 1. 读取基础统计数据
     df_stats = pd.read_excel(stats_file, sheet_name='详细数据')
@@ -250,50 +249,61 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
     df_expanded = pd.DataFrame(expanded_rows)
 
     # ==========================================
-    # 🚀 核心一：读取【商品管理】匹配 SKU 资料
+    # 🚀 核心一：精准映射【商品管理】
     # ==========================================
-    print("正在读取《商品管理》资料库并进行智能匹配...")
+    print("正在读取《商品管理》并执行精确映射...")
     df_master = pd.read_excel(template_file, sheet_name='商品管理')
-
-    # 暴力清除表头前后的隐藏空格，防止由于 Excel 输入不规范导致报错
+    
+    # 清除潜在的空格干扰
     df_master.columns = df_master.columns.astype(str).str.strip()
     df_expanded.columns = df_expanded.columns.astype(str).str.strip()
 
-    # 智能定位 SKU 列名
-    possible_sku_names = ['SKU Name', 'SKU', '商品货号', '货号', '商品SKU', 'ASIN', '商品编码']
-    master_sku_col = next((col for col in possible_sku_names if col in df_master.columns), None)
-
-    if master_sku_col is None:
-        raise ValueError(f"❌ 匹配失败！在《商品管理》中找不到SKU列。\n🤔 系统读到的表头是: {list(df_master.columns)}")
+    # 根据你提供的官方字典进行强行改名映射
+    product_mapping = {
+        '*商品货号': 'SKU Name',
+        '*商品名称': '商品统称',
+        '*商品编码': 'HS',
+        '*规格型号': '申报要素',
+        '*申报计量单位': '申报单位',
+        '*法定计量单位': '法定单位',
+        # 兼容不带星号的情况
+        '商品货号': 'SKU Name',
+        'SKU': 'SKU Name'
+    }
+    df_master = df_master.rename(columns=product_mapping)
     
-    if master_sku_col != 'SKU Name':
-        df_master = df_master.rename(columns={master_sku_col: 'SKU Name'})
+    if 'SKU Name' not in df_master.columns:
+        raise ValueError(f"❌ 匹配失败！在《商品管理》中找不到'*商品货号'或'SKU Name'列。\n系统读到的表头是: {list(df_master.columns)}")
 
     # 第一次匹配：商品信息
     df_final = pd.merge(df_expanded, df_master, on='SKU Name', how='left')
 
     # ==========================================
-    # 🚀 核心二：读取【FBA仓库代码表】匹配地址资料
+    # 🚀 核心二：精准映射【FBA仓库代码表】
     # ==========================================
-    print("正在读取《FBA仓库代码表》匹配仓库地址...")
+    print("正在读取《FBA仓库代码表》并执行精确映射...")
     try:
         df_warehouse = pd.read_excel(template_file, sheet_name='FBA仓库代码表')
         df_warehouse.columns = df_warehouse.columns.astype(str).str.strip()
 
-        # 智能定位 仓库代码 列名
-        possible_wh_names = ['FBA Warehouse', 'FBA', '仓库代码', '仓库代码/FBA code', 'FBA Code', '目的仓']
-        master_wh_col = next((col for col in possible_wh_names if col in df_warehouse.columns), None)
+        # 根据你提供的官方字典进行强行改名映射
+        warehouse_mapping = {
+            '目的港': '目的地',
+            'Destination': '英文目的地',
+            '完整地址': '仓库地址全',
+            'FBA': 'FBA Warehouse',
+            '仓库代码': 'FBA Warehouse',
+            'FBA Code': 'FBA Warehouse'
+        }
+        df_warehouse = df_warehouse.rename(columns=warehouse_mapping)
 
-        if master_wh_col:
-            if master_wh_col != 'FBA Warehouse':
-                df_warehouse = df_warehouse.rename(columns={master_wh_col: 'FBA Warehouse'})
-            
+        if 'FBA Warehouse' in df_warehouse.columns:
             # 去重：防止仓库表里有重复项导致数据行数翻倍
             df_warehouse = df_warehouse.drop_duplicates(subset=['FBA Warehouse'])
             # 第二次匹配：仓库信息
             df_final = pd.merge(df_final, df_warehouse, on='FBA Warehouse', how='left')
         else:
-            print(f"⚠️ 未找到仓库代码列，仓库表头为: {list(df_warehouse.columns)}")
+            print(f"⚠️ 未找到用于匹配的仓库代码列，仓库表头为: {list(df_warehouse.columns)}")
     except Exception as e:
         print(f"⚠️ 《FBA仓库代码表》读取失败，部分地址信息将为空: {e}")
 
@@ -310,14 +320,12 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
     if '单个体积' in df_final.columns:
         df_final['体积'] = df_final['总数'] * pd.to_numeric(df_final['单个体积'], errors='coerce').fillna(0)
 
-    # 兜底填充：如果商品或仓库表里没写这些字段，强制给定默认值
-    default_values = {
-        '国家编码': 'US', '货币编码': 'USD', 
-        '离境口岸': '深圳', '起运港': 'SHENZHEN', '境内货源地': '深圳'
-    }
-    for col, val in default_values.items():
-        if col not in df_final.columns:
-            df_final[col] = val
+    # 兜底填充：如果表里没写，强制给定默认值（国家和货币如果仓库表里有，就不会被覆盖）
+    if '国家编码' not in df_final.columns: df_final['国家编码'] = 'US'
+    if '货币编码' not in df_final.columns: df_final['货币编码'] = 'USD'
+    if '离境口岸' not in df_final.columns: df_final['离境口岸'] = '深圳'
+    if '起运港' not in df_final.columns: df_final['起运港'] = 'SHENZHEN'
+    if '境内货源地' not in df_final.columns: df_final['境内货源地'] = '深圳'
 
     # 导出底层表
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
