@@ -191,7 +191,7 @@ def generate_fba_stats(input_folder: Path, output_excel_path: Path):
     print(f"✅ 统计完成，已生成: {output_excel_path.name}")
 
 # ==========================================
-# 模块 3 & 4 (终极完整版): 纯 Python 双引擎匹配 & 精确数值核算
+# 模块 3 & 4 (终极完整版): 纯 Python 双引擎匹配 & 精确数值核算 (解决吞零问题)
 # ==========================================
 def process_data_pure_python(stats_file, mixed_file, template_file, output_path):
     print("\n--- [3&4/6] 启动纯 Python 计算引擎 (展开混装 & 精准双重匹配) ---")
@@ -250,16 +250,15 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
     df_expanded = pd.DataFrame(expanded_rows)
 
     # ==========================================
-    # 🚀 核心一：精准映射【商品管理】
+    # 🚀 核心一：精准映射【商品管理】(增加 dtype=str 防吞零)
     # ==========================================
     print("正在读取《商品管理》并执行精确映射...")
-    df_master = pd.read_excel(template_file, sheet_name='商品管理')
+    # ✨ 核心改动 1：强行按字符串(str)格式读取，防止 007 被自动转成 7
+    df_master = pd.read_excel(template_file, sheet_name='商品管理', dtype=str)
     
-    # 清除潜在的空格干扰
     df_master.columns = df_master.columns.astype(str).str.strip()
     df_expanded.columns = df_expanded.columns.astype(str).str.strip()
 
-    # 根据提供的映射字典进行重命名
     product_mapping = {
         '*商品货号': 'SKU Name',
         '*商品名称': '商品统称',
@@ -267,17 +266,16 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
         '*规格型号': '申报要素',
         '*申报计量单位': '申报单位',
         '*法定计量单位': '法定单位',
+        '商品单位': '商品单位',
         '商品货号': 'SKU Name',
         'SKU': 'SKU Name',
         '境内货源地': '境内货源地'
-         
     }
     df_master = df_master.rename(columns=product_mapping)
     
     if 'SKU Name' not in df_master.columns:
         raise ValueError(f"❌ 匹配失败！在《商品管理》中找不到 SKU 列。表头为: {list(df_master.columns)}")
 
-    # 第一次匹配：商品基础资料
     df_final = pd.merge(df_expanded, df_master, on='SKU Name', how='left')
 
     # ==========================================
@@ -285,13 +283,17 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
     # ==========================================
     print("正在读取《FBA仓库代码表》匹配仓库地址...")
     try:
-        df_warehouse = pd.read_excel(template_file, sheet_name='FBA仓库代码表')
+        # ✨ 核心改动 2：仓库表也按字符串读取，保护邮编前导零
+        df_warehouse = pd.read_excel(template_file, sheet_name='FBA仓库代码表', dtype=str)
         df_warehouse.columns = df_warehouse.columns.astype(str).str.strip()
 
         warehouse_mapping = {
+            '仓库编码': 'FBA Warehouse', 
             '目的港': '目的地',
             'Destination': '英文目的地',
             '完整地址': '仓库地址全',
+            '国家编码': '国家编码',
+            '货币编码': '货币编码',
             'FBA': 'FBA Warehouse',
             '仓库代码': 'FBA Warehouse',
             'FBA Code': 'FBA Warehouse'
@@ -299,51 +301,51 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
         df_warehouse = df_warehouse.rename(columns=warehouse_mapping)
 
         if 'FBA Warehouse' in df_warehouse.columns:
-            df_warehouse = df_warehouse.drop_duplicates(subset=['FBA Warehouse'])
+            cols_to_keep = ['FBA Warehouse', '目的地', '英文目的地', '仓库地址全', '国家编码', '货币编码']
+            existing_cols = [c for c in cols_to_keep if c in df_warehouse.columns]
+            df_warehouse = df_warehouse[existing_cols].drop_duplicates(subset=['FBA Warehouse'])
             df_final = pd.merge(df_final, df_warehouse, on='FBA Warehouse', how='left')
     except Exception as e:
         print(f"⚠️ 《FBA仓库代码表》匹配跳过: {e}")
 
     # ==========================================
-    # 🚀 纯 Python 自动核算 (完全锁定数值计算)
+    # 🚀 核心三：纯 Python 自动核算与格式化
     # ==========================================
     print("正在执行纯 Python 数值核算(毛重、体积)...")
     
-    # 强行确保这些列都存在，防止业务员没填导致报错
+    # 将计算列强制转换为数字格式
     required_calc_cols = ['单价', '单个净重', '单个毛重', '长', '宽', '高', '单箱数量', '总数']
     for col in required_calc_cols:
         if col not in df_final.columns:
             df_final[col] = 0
-
-    # 将这些列强制转换为数字格式 (如果是字母或空值，变成 0)
-    for col in required_calc_cols:
         df_final[col] = pd.to_numeric(df_final[col], errors='coerce').fillna(0)
 
-    # 1. 计算总价
+    # 计算总价与重量
     df_final['总价'] = df_final['总数'] * df_final['单价']
-    
-    # 2. 计算毛重
-    # 如果表里填了单个毛重就用表里的，如果没填（或者等于0），就强制用 单个净重 + 0.1
     df_final['单个毛重'] = np.where(df_final['单个毛重'] > 0, df_final['单个毛重'], df_final['单个净重'] + 0.1)
     df_final['总毛重'] = df_final['总数'] * df_final['单个毛重']
-    
-    # 3. 计算净重
     df_final['总净重'] = df_final['总数'] * df_final['单个净重']
     
-    # 4. 计算体积 (加上 /100000 的专属公式)
-    # 把单箱数量里的 0 替换成 1，防止除以 0 导致报错崩溃
+    # 计算体积
     divisor = df_final['单箱数量'].replace(0, 1)
     df_final['单个SKU体积'] = (df_final['长'] * df_final['宽'] * df_final['高']) / divisor / 100000
     df_final['体积'] = df_final['总数'] * df_final['单个SKU体积']
 
-    # 兜底填充：如果表里没写，强制给定默认值
-    if '国家编码' not in df_final.columns: df_final['国家编码'] = 'US'
-    if '货币编码' not in df_final.columns: df_final['货币编码'] = 'USD'
-    if '离境口岸' not in df_final.columns: df_final['离境口岸'] = '深圳'
-    if '起运港' not in df_final.columns: df_final['起运港'] = 'SHENZHEN'
-    if '境内货源地' not in df_final.columns: df_final['境内货源地'] = '深圳'
+    # ✨ 核心改动 3：海关单位代码终极护城河！强制补齐 3 位数
+    for unit_col in ['申报单位', '法定单位']:
+        if unit_col in df_final.columns:
+            # 如果单元格有值，强制转字符串 -> 截取掉可能存在的".0" -> 在前面补0直到满足3位
+            df_final[unit_col] = df_final[unit_col].apply(
+                lambda x: str(x).split('.')[0].zfill(3) if pd.notna(x) and str(x).strip() not in ['', 'nan', 'None'] else x
+            )
 
-    # 导出底层表
+    # 兜底默认值
+    defaults = {'国家编码': 'US', '货币编码': 'USD', '离境口岸': '深圳', '起运港': 'SHENZHEN', '境内货源地': '深圳'}
+    for col, val in defaults.items():
+        if col not in df_final.columns or pd.isna(df_final.loc[0, col]):
+            df_final[col] = val
+
+    # 导出
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         df_final.to_excel(writer, index=False, sheet_name='明细')
         
@@ -351,12 +353,12 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
     return df_final
 
 # ==========================================
-# 模块 5: 创建报关单 (模块 5 完整代码)
+# 模块 5: 创建报关单 (整合文件名提取 + 精确核算)
 # ==========================================
 def generate_customs_docs(info_file_path, template_file_path, output_dir):
-    print("\n--- [5/6] 开始生成 AMZ 多份报关单 (精确校准版) ---")
+    print("\n--- [5/6] 开始生成 AMZ 多份报关单 (全逻辑整合版) ---")
     
-    # 读取模块 4 生成的底层数据
+    # 读取底层明细数据
     df_all = pd.read_excel(info_file_path, sheet_name='明细')
     
     thin_side = Side(style='thin')
@@ -376,7 +378,7 @@ def generate_customs_docs(info_file_path, template_file_path, output_dir):
         
         wb = openpyxl.load_workbook(template_file_path)
         
-        # ---- 1. 发票工作表 ----
+        # ---- 1. 发票工作表 (Invoice) ----
         ws_inv = wb['发票']
         ws_inv['G5'] = date_inv
         ws_inv['B7'] = df_group.loc[0, '离境口岸'] if '离境口岸' in df_group else ''
@@ -385,19 +387,24 @@ def generate_customs_docs(info_file_path, template_file_path, output_dir):
         ws_inv['C9'] = wh_code
         ws_inv['B10'] = df_group.loc[0, '英文目的地'] if '英文目的地' in df_group else ''
         
+        # ✨ 重新加入：提取文件名中的 Shipment ID 到 G8
+        file_name_full = str(df_group.loc[0, 'File Name'])
+        parts = file_name_full.split('-')
+        ws_inv['G8'] = parts[2] if len(parts) > 2 else ""
+
         # 填充数据行 (13行开始)
         for i in range(n):
             row = 13 + i
             ws_inv.cell(row=row, column=2, value=df_group.loc[i, '商品统称']) 
             ws_inv.cell(row=row, column=4, value=df_group.loc[i, '总数']) 
-            ws_inv.cell(row=row, column=5, value=df_group.loc[i, '申报单位'] if '申报单位' in df_group else '个')                     
+            ws_inv.cell(row=row, column=5, value=df_group.loc[i, '商品单位'] if '商品单位' in df_group else '个')                     
             ws_inv.cell(row=row, column=6, value=df_group.loc[i, '单价'])     
             ws_inv.cell(row=row, column=7, value=df_group.loc[i, '总价']) 
 
-        # 合计行：数据行下方一行 (13 + n)
+        # 合计行 (13 + n)
         total_row_inv = 13 + n
         ws_inv.cell(row=total_row_inv, column=1, value="合计（TOTAL）")
-        # SUM范围避开合计行：13 到 12+n
+        # SUM范围：13 到 12+n (避开合计行自身)
         ws_inv.cell(row=total_row_inv, column=4, value=f"=SUM(D13:D{12+n})")
         ws_inv.cell(row=total_row_inv, column=7, value=f"=SUM(G13:G{12+n})")
         
@@ -408,7 +415,7 @@ def generate_customs_docs(info_file_path, template_file_path, output_dir):
             for c in range(1, 8): 
                 ws_inv.cell(row=r, column=c).border = thin_border
 
-        # ---- 2. 装箱单工作表 ----
+        # ---- 2. 装箱单工作表 (Packing List) ----
         ws_pk = wb['装箱单']
         ws_pk['B10'] = df_group.loc[0, '仓库地址全'] if '仓库地址全' in df_group else ''
         
@@ -417,15 +424,16 @@ def generate_customs_docs(info_file_path, template_file_path, output_dir):
             ws_pk.cell(row=row, column=2, value=df_group.loc[i, '商品统称'])
             ws_pk.cell(row=row, column=3, value=df_group.loc[i, '总数'])
             ws_pk.cell(row=row, column=4, value="PCS")
-            # 这里的字段必须与模块 4 算好的字段名一致
+            # 这里的数值已由模块 4 算好：总毛重 = 总数 * (净重+0.1)
             ws_pk.cell(row=row, column=5, value=df_group.loc[i, '总毛重'])
             ws_pk.cell(row=row, column=6, value=df_group.loc[i, '总净重'])
+            # 这里的数值已由模块 4 算好：总体积 = 总数 * (长*宽*高/单箱数/100000)
             ws_pk.cell(row=row, column=7, value=df_group.loc[i, '体积'])
 
-        # 合计行：数据行下方一行 (14 + n)
+        # 合计行 (14 + n)
         total_row_pk = 14 + n
         ws_pk.cell(row=total_row_pk, column=1, value="合计（TOTAL）")
-        # SUM范围避开合计行：14 到 13+n
+        # SUM范围：14 到 13+n
         ws_pk.cell(row=total_row_pk, column=3, value=f"=SUM(C14:C{13+n})")
         ws_pk.cell(row=total_row_pk, column=4, value="PCS")
         ws_pk.cell(row=total_row_pk, column=5, value=f"=SUM(E14:E{13+n})")
@@ -439,51 +447,47 @@ def generate_customs_docs(info_file_path, template_file_path, output_dir):
             for c in range(1, 8):
                 ws_pk.cell(row=r, column=c).border = thin_border
 
-        # ---- 3. 报关单工作表 (略，保持原有逻辑即可) ----
+        # ---- 3. 报关单工作表 (Customs Declaration) ----
         ws_decl = wb['报关单']
         ws_decl['J3'] = date_decl
         ws_decl['J3'].alignment = Alignment(wrapText=True)
-        ws_decl['A7'] = ws_inv['G8'].value
-        ws_decl['J7'] = ws_inv['B9'].value
-        total_boxes = int(round(df_group['箱数'].sum(), 0)) if '箱数' in df_group else 0
+        ws_decl['A7'] = f"=发票!G8"
+        ws_decl['J7'] = f"=发票!B9"
+        
+        # 汇总箱数 (来自模块 4 的‘箱数’列求和)
+        total_boxes = int(round(df_group['箱数'].sum(), 0))
         ws_decl['D9'] = total_boxes
-        ws_decl['F9'] = f"=装箱单!E{total_row_pk}"
-        ws_decl['H9'] = f"=装箱单!F{total_row_pk}"
-        ws_decl['A12'] = ws_inv['C9'].value
+        ws_decl['F9'] = f"=装箱单!E{total_row_pk}"  # 引用装箱单的总毛重
+        ws_decl['H9'] = f"=装箱单!F{total_row_pk}"  # 引用装箱单的总净重
+        ws_decl['A12'] = f"=发票!C9"
 
         for i in range(n):
             odd_r = 15 + 2*i
             ws_decl.cell(row=odd_r, column=1, value=i+1)
-            ws_decl.cell(row=odd_r, column=2, value=df_group.loc[i, 'HS'] if 'HS' in df_group else '')
-            ws_decl.cell(row=odd_r, column=3, value=df_group.loc[i, '商品统称'] if '商品统称' in df_group else '')
-            ws_decl.cell(row=odd_r, column=4, value=df_group.loc[i, '总数'] if '总数' in df_group else 0)
-            ws_decl.cell(row=odd_r, column=5, value="个")
-            ws_decl.cell(row=odd_r, column=6, value=df_group.loc[i, '单价'] if '单价' in df_group else 0)
-            ws_decl.cell(row=odd_r, column=7, value=df_group.loc[i, '总数'] * df_group.loc[i, '单价'] if '总数' in df_group and '单价' in df_group else 0)
+            ws_decl.cell(row=odd_r, column=2, value=df_group.loc[i, 'HS'])
+            ws_decl.cell(row=odd_r, column=3, value=f"=发票!B{13+i}") # 商品名称
+            ws_decl.cell(row=odd_r, column=4, value=f"=发票!D{13+i}") # 数量
+            ws_decl.cell(row=odd_r, column=5, value=f"=发票!E{13+i}") # 单位
+            ws_inv_price_cell = f"发票!F{13+i}"
+            ws_inv_total_cell = f"发票!G{13+i}"
+            ws_decl.cell(row=odd_r, column=6, value=f"={ws_inv_price_cell}")
+            ws_decl.cell(row=odd_r, column=7, value=f"={ws_inv_total_cell}")
             ws_decl.cell(row=odd_r, column=8, value="USD")
             ws_decl.cell(row=odd_r, column=9, value="中国")
             ws_decl.cell(row=odd_r, column=10, value="美国")
-            ws_decl.cell(row=odd_r, column=11, value=df_group.loc[i, '境内货源地'] if '境内货源地' in df_group else '')
+            ws_decl.cell(row=odd_r, column=11, value=df_group.loc[i, '境内货源地'] if '境内货源地' in df_group else '深圳')
 
             even_r = 16 + 2*i
-            ws_decl.cell(row=even_r, column=2, value=df_group.loc[i, '申报要素'] if '申报要素' in df_group else '')
+            ws_decl.cell(row=even_r, column=2, value=df_group.loc[i, '申报要素'])
             ws_decl.merge_cells(start_row=even_r, start_column=2, end_row=even_r, end_column=12)
 
-        footer_r1 = 14 + 2*n + 1
+        # 报关单底部边框处理
         footer_r2 = 14 + 2*n + 2
-        ws_decl.cell(row=footer_r1, column=1, value="报关人员                        报关人员证号                                电话            兹申明对以上内容承担如实申报、依法纳税之法律责任")
-        ws_decl.merge_cells(start_row=footer_r1, start_column=1, end_row=footer_r1, end_column=9)
-        ws_decl.cell(row=footer_r2, column=1, value="申报单位                                                                                        申报单位（签章）")
-        ws_decl.merge_cells(start_row=footer_r2, start_column=1, end_row=footer_r2, end_column=9)
-        ws_decl.cell(row=footer_r1, column=10, value="海关批注及签章")
-        ws_decl.merge_cells(start_row=footer_r1, start_column=10, end_row=footer_r2, end_column=12)
-        ws_decl.cell(row=footer_r1, column=10).alignment = Alignment(horizontal='center', vertical='center')
-
         for r in range(14, footer_r2 + 1):
-            for c in range(1, 13):
+            for c in range(1, 13): 
                 ws_decl.cell(row=r, column=c).border = thin_border
 
-        # ---- 4. 合同工作表 ----
+        # ---- 4. 合同工作表 (Sales Contract) ----
         ws_ct = wb['合同']
         ws_ct['H4'] = f"=发票!G5"
         
@@ -498,6 +502,7 @@ def generate_customs_docs(info_file_path, template_file_path, output_dir):
         total_row_ct = 12 + n
         ws_ct.cell(row=total_row_ct, column=1, value="合计（TOTAL）")
         ws_ct.merge_cells(start_row=total_row_ct, start_column=1, end_row=total_row_ct, end_column=4)
+        # SUM范围：12 到 11+n
         ws_ct.cell(row=total_row_ct, column=5, value=f"=SUM(E12:E{11+n})")
         ws_ct.cell(row=total_row_ct, column=6, value="个")
         ws_ct.cell(row=total_row_ct, column=8, value=f"=SUM(H12:H{11+n})")
