@@ -502,7 +502,23 @@ def generate_customs_docs(info_file_path, template_file_path, output_dir):
         ws_ct.cell(row=total_row_ct, column=6, value="个")
         ws_ct.cell(row=total_row_ct, column=8, value=f"=SUM(H12:H{11+n})")
 
+        ws_ct.cell(row=total_row_ct+2, column=1, value="2. Payment Terms: T/T")
+        ws_ct.cell(row=total_row_ct+3, column=1, value="3. Shipment: Prompt ")
+        ws_ct.cell(row=total_row_ct+3, column=3, value=date_contract_ship)
+        ws_ct.cell(row=total_row_ct+3, column=4, value="前")
+        ws_ct.cell(row=total_row_ct+4, column=1, value="4. Package: Total")
+        ws_ct.cell(row=total_row_ct+5, column=1, value="5. Shipping port: ")
+        ws_ct.cell(row=total_row_ct+5, column=3, value=ws_inv['B8'].value)
+        ws_ct.cell(row=total_row_ct+6, column=1, value="6. Destination: ")
+        ws_ct.cell(row=total_row_ct+6, column=3, value=ws_inv['B10'].value)
+        ws_ct.cell(row=total_row_ct+7, column=1, value="Please sign and return by fax.")
+
+        for r in range(10, total_row_ct + 1):
+            for c in range(1, 9):
+                ws_ct.cell(row=r, column=c).border = thin_border
+
         wb.save(output_dir / output_name)
+        wb.close()
     print("✅ 报关单生成完成！已修正合计行范围与体积填充。")
 
 
