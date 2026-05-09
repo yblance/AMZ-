@@ -482,7 +482,16 @@ def generate_customs_docs(info_file_path, template_file_path, output_dir):
             ws_decl.merge_cells(start_row=even_r, start_column=2, end_row=even_r, end_column=12)
 
         # 报关单底部边框处理
+        footer_r1 = 14 + 2*n + 1
         footer_r2 = 14 + 2*n + 2
+        ws_decl.cell(row=footer_r1, column=1, value="报关人员                        报关人员证号                                电话            兹申明对以上内容承担如实申报、依法纳税之法律责任")
+        ws_decl.merge_cells(start_row=footer_r1, start_column=1, end_row=footer_r1, end_column=9)
+        ws_decl.cell(row=footer_r2, column=1, value="申报单位                                                                                        申报单位（签章）")
+        ws_decl.merge_cells(start_row=footer_r2, start_column=1, end_row=footer_r2, end_column=9)
+        ws_decl.cell(row=footer_r1, column=10, value="海关批注及签章")
+        ws_decl.merge_cells(start_row=footer_r1, start_column=10, end_row=footer_r2, end_column=12)
+        ws_decl.cell(row=footer_r1, column=10).alignment = Alignment(horizontal='center', vertical='center')
+
         for r in range(14, footer_r2 + 1):
             for c in range(1, 13): 
                 ws_decl.cell(row=r, column=c).border = thin_border
