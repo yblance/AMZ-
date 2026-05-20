@@ -203,17 +203,58 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
     mix_mapping = {}
     if mixed_file.exists():
         wb_mixed = pd.read_excel(mixed_file, sheet_name=1, header=None) 
-        skus = wb_mixed.iloc[5:14, 0].dropna().tolist()
+        max_row, max_col = wb_mixed.shape
         
-        for col_idx in range(1, wb_mixed.shape[1]):
-            code = wb_mixed.iloc[15, col_idx]
-            if pd.notna(code) and str(code).strip():
-                code_str = str(code).strip()
+        # --- 步骤 1：动态获取 SKU 列表，支持任意数量的 SKU ---
+        sku_list = []
+        for r in range(5, max_row):  # pandas 索引从 0 开始，5 对应 Excel 的第 6 行
+            sku = wb_mixed.iloc[r, 0]
+            if pd.isna(sku) or not str(sku).strip():
+                break  # 遇到空白行代表 SKU 列表结束
+            sku_list.append((r, str(sku).strip()))
+            
+        # --- 步骤 2：动态寻找或者自动推导箱号 (Code) ---
+        code_row = None
+        for r in range(max_row):
+            for c in range(max_col):
+                val = wb_mixed.iloc[r, c]
+                if pd.notna(val) and isinstance(val, str) and 'P1 - B' in val:
+                    code_row = r
+                    break
+            if code_row is not None:
+                break
+
+        # --- 步骤 3：组装混装字典 ---
+        for col_idx in range(1, max_col):
+            code_str = None
+            if code_row is not None:
+                # 找到了手动填写的 code 行
+                code = wb_mixed.iloc[code_row, col_idx]
+                if pd.notna(code) and str(code).strip():
+                    code_str = str(code).strip()
+            else:
+                # 没找到，则从第 5 行 (index 4) 的表头自动推导
+                header = wb_mixed.iloc[4, col_idx]
+                if pd.notna(header) and '包装箱' in str(header) and '数量' in str(header):
+                    match = re.search(r'包装箱\s*(\d+)\s*数量', str(header))
+                    if match:
+                        box_num = match.group(1)
+                        # 从第 2 行 (index 1) 获取装箱组号，默认用 P1
+                        pack_group = "1"
+                        pg_val = wb_mixed.iloc[1, 0]
+                        if pd.notna(pg_val) and '装箱组' in str(pg_val):
+                            pg_match = re.search(r'装箱组：\s*(\d+)', str(pg_val))
+                            if pg_match:
+                                pack_group = pg_match.group(1)
+                        code_str = f"P{pack_group} - B{box_num}"
+            
+            if code_str:
                 items = []
-                for i, sku in enumerate(skus):
-                    qty = wb_mixed.iloc[5 + i, col_idx]
+                for r, sku in sku_list:
+                    qty = wb_mixed.iloc[r, col_idx]
                     if pd.notna(qty) and isinstance(qty, (int, float)) and qty > 0:
                         items.append({'SKU Name': sku, 'Per_Box_Qty': qty})
+                
                 if items:
                     mix_mapping[code_str] = items
 
