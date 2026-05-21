@@ -263,9 +263,8 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
         if sku_name == 'Mixed SKUs':
             additional_data = str(row.get('Additional Data', ''))
             codes = [c.strip() for c in additional_data.split('、') if c.strip()]
-            box_count = row.get('Count', 1)
             
-            # --- 🎯 核心修复：按 SKU 聚合当前混装条目下所有箱子的数量 ---
+            # --- 🎯 核心修复：单纯将混装表中该 SKU 的值进行绝对相加 ---
             sku_aggregated = {}
             matched_box_count = 0
             
@@ -277,28 +276,30 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
                         s_qty = item['Per_Box_Qty']
                         if s_name not in sku_aggregated:
                             sku_aggregated[s_name] = 0
-                        # 将所有匹配到的箱子中，同一个 SKU 的数量进行累加
+                        # N9 + R9 + Z9 + AE9 ... 的累加逻辑就在这里
                         sku_aggregated[s_name] += s_qty
             
             if sku_aggregated:
-                # 均摊箱数：匹配到的总箱数 / 出现的唯一SKU种类数
+                # 均摊箱数保留，因为箱数列你是确认没问题的
                 fraction_val = round(matched_box_count / len(sku_aggregated), 1)
                 
                 for s_name, total_qty in sku_aggregated.items():
                     new_row = row.copy()
                     new_row['SKU Name'] = s_name
-                    # 混装商品的总数：所有关联箱子中该SKU数量之和 * 统计出现的组数
-                    new_row['总数'] = total_qty * box_count 
+                    # 🎯 直接将累加的最终结果作为总数，坚决不再乘以任何倍数
+                    new_row['总数'] = total_qty 
                     new_row['箱数'] = fraction_val 
-                    new_row['Is_Mixed'] = True  # 🎯 标记为混装，保护计算结果
+                    new_row['Is_Mixed'] = True  # 🎯 标记为混装，锁定数值
                     expanded_rows.append(new_row)
             else:
-                row['Is_Mixed'] = False
-                expanded_rows.append(row)
+                new_row = row.copy()
+                new_row['Is_Mixed'] = False
+                expanded_rows.append(new_row)
         else:
-            row['箱数'] = row.get('Count', 1)
-            row['Is_Mixed'] = False # 🎯 标记为非混装
-            expanded_rows.append(row)
+            new_row = row.copy()
+            new_row['箱数'] = new_row.get('Count', 1)
+            new_row['Is_Mixed'] = False # 🎯 标记为非混装
+            expanded_rows.append(new_row)
 
     df_expanded = pd.DataFrame(expanded_rows)
 
@@ -372,12 +373,9 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
         df_final[col] = pd.to_numeric(df_final[col], errors='coerce').fillna(0)
 
     # 🎯 核心修复点：动态计算『总数』
-    # 如果不是混装，总数 = 箱数 * 单箱数量；如果是混装，保留上面已经赋予的总数
-    df_final['总数'] = np.where(
-        df_final['Is_Mixed'] == False, 
-        df_final['箱数'] * df_final['单箱数量'], 
-        df_final['总数']
-    )
+    # 采用安全过滤：只对【非混装商品】执行 箱数 * 单箱数量；【混装商品】将直接保留上方累加的绝对值！
+    mask_normal = df_final['Is_Mixed'] != True
+    df_final.loc[mask_normal, '总数'] = df_final.loc[mask_normal, '箱数'] * df_final.loc[mask_normal, '单箱数量']
 
     # 级联计算总价与重量
     df_final['总价'] = df_final['总数'] * df_final['单价']
@@ -403,7 +401,7 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
         if col not in df_final.columns or pd.isna(df_final.loc[0, col]):
             df_final[col] = val
 
-    # 清理中间辅助列，保持表结构干净
+    # 清理中间辅助列，保持底层表的干净整洁
     if 'Is_Mixed' in df_final.columns:
         df_final = df_final.drop(columns=['Is_Mixed'])
 
