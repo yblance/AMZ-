@@ -265,27 +265,39 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
             codes = [c.strip() for c in additional_data.split('、') if c.strip()]
             box_count = row.get('Count', 1)
             
-            matched_items = []
+            # --- 🎯 核心修复：按 SKU 聚合当前混装条目下所有箱子的数量 ---
+            sku_aggregated = {}
+            matched_box_count = 0
+            
             for code in codes:
                 if code in mix_mapping:
-                    matched_items.extend(mix_mapping[code])
+                    matched_box_count += 1
+                    for item in mix_mapping[code]:
+                        s_name = item['SKU Name']
+                        s_qty = item['Per_Box_Qty']
+                        if s_name not in sku_aggregated:
+                            sku_aggregated[s_name] = 0
+                        # 将所有匹配到的箱子中，同一个 SKU 的数量进行累加
+                        sku_aggregated[s_name] += s_qty
             
-            if matched_items:
-                fraction_val = round(len([c for c in codes if c in mix_mapping]) / len(matched_items), 1)
-                for item in matched_items:
+            if sku_aggregated:
+                # 均摊箱数：匹配到的总箱数 / 出现的唯一SKU种类数
+                fraction_val = round(matched_box_count / len(sku_aggregated), 1)
+                
+                for s_name, total_qty in sku_aggregated.items():
                     new_row = row.copy()
-                    new_row['SKU Name'] = item['SKU Name']
-                    # 混装商品的“总数”直接取自混装表：箱单出现的次数 * 混装表里的该箱SKU数量
-                    new_row['总数'] = box_count * item['Per_Box_Qty'] 
+                    new_row['SKU Name'] = s_name
+                    # 混装商品的总数：所有关联箱子中该SKU数量之和 * 统计出现的组数
+                    new_row['总数'] = total_qty * box_count 
                     new_row['箱数'] = fraction_val 
-                    new_row['Is_Mixed'] = True  # 🎯 新增：标记为混装
+                    new_row['Is_Mixed'] = True  # 🎯 标记为混装，保护计算结果
                     expanded_rows.append(new_row)
             else:
                 row['Is_Mixed'] = False
                 expanded_rows.append(row)
         else:
-            row['箱数'] = row['Count']
-            row['Is_Mixed'] = False # 🎯 新增：标记为非混装
+            row['箱数'] = row.get('Count', 1)
+            row['Is_Mixed'] = False # 🎯 标记为非混装
             expanded_rows.append(row)
 
     df_expanded = pd.DataFrame(expanded_rows)
