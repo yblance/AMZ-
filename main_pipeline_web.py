@@ -205,15 +205,15 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
         wb_mixed = pd.read_excel(mixed_file, sheet_name=1, header=None) 
         max_row, max_col = wb_mixed.shape
         
-        # --- 步骤 1：动态获取 SKU 列表，支持任意数量的 SKU ---
+        # 步骤 1：动态获取 SKU 列表，支持任意数量的 SKU
         sku_list = []
-        for r in range(5, max_row):  # pandas 索引从 0 开始，5 对应 Excel 的第 6 行
+        for r in range(5, max_row):  
             sku = wb_mixed.iloc[r, 0]
             if pd.isna(sku) or not str(sku).strip():
-                break  # 遇到空白行代表 SKU 列表结束
+                break  
             sku_list.append((r, str(sku).strip()))
             
-        # --- 步骤 2：动态寻找或者自动推导箱号 (Code) ---
+        # 步骤 2：动态寻找或者自动推导箱号 (Code)
         code_row = None
         for r in range(max_row):
             for c in range(max_col):
@@ -224,22 +224,19 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
             if code_row is not None:
                 break
 
-        # --- 步骤 3：组装混装字典 ---
+        # 步骤 3：组装混装字典
         for col_idx in range(1, max_col):
             code_str = None
             if code_row is not None:
-                # 找到了手动填写的 code 行
                 code = wb_mixed.iloc[code_row, col_idx]
                 if pd.notna(code) and str(code).strip():
                     code_str = str(code).strip()
             else:
-                # 没找到，则从第 5 行 (index 4) 的表头自动推导
                 header = wb_mixed.iloc[4, col_idx]
                 if pd.notna(header) and '包装箱' in str(header) and '数量' in str(header):
                     match = re.search(r'包装箱\s*(\d+)\s*数量', str(header))
                     if match:
                         box_num = match.group(1)
-                        # 从第 2 行 (index 1) 获取装箱组号，默认用 P1
                         pack_group = "1"
                         pg_val = wb_mixed.iloc[1, 0]
                         if pd.notna(pg_val) and '装箱组' in str(pg_val):
@@ -258,7 +255,7 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
                 if items:
                     mix_mapping[code_str] = items
 
-    # 3. 展开 Mixed SKUs 行
+    # 3. 展开 Mixed SKUs 行，并打上是否混装的标记
     expanded_rows = []
     for _, row in df_stats.iterrows():
         sku_name = str(row.get('SKU Name', '')).strip()
@@ -278,23 +275,25 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
                 for item in matched_items:
                     new_row = row.copy()
                     new_row['SKU Name'] = item['SKU Name']
+                    # 混装商品的“总数”直接取自混装表：箱单出现的次数 * 混装表里的该箱SKU数量
                     new_row['总数'] = box_count * item['Per_Box_Qty'] 
                     new_row['箱数'] = fraction_val 
+                    new_row['Is_Mixed'] = True  # 🎯 新增：标记为混装
                     expanded_rows.append(new_row)
             else:
+                row['Is_Mixed'] = False
                 expanded_rows.append(row)
         else:
-            row['总数'] = row['Count'] 
             row['箱数'] = row['Count']
+            row['Is_Mixed'] = False # 🎯 新增：标记为非混装
             expanded_rows.append(row)
 
     df_expanded = pd.DataFrame(expanded_rows)
 
     # ==========================================
-    # 🚀 核心一：精准映射【商品管理】(增加 dtype=str 防吞零)
+    # 核心一：精准映射【商品管理】
     # ==========================================
     print("正在读取《商品管理》并执行精确映射...")
-    # ✨ 核心改动 1：强行按字符串(str)格式读取，防止 007 被自动转成 7
     df_master = pd.read_excel(template_file, sheet_name='商品管理', dtype=str)
     
     df_master.columns = df_master.columns.astype(str).str.strip()
@@ -320,11 +319,10 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
     df_final = pd.merge(df_expanded, df_master, on='SKU Name', how='left')
 
     # ==========================================
-    # 🚀 核心二：精准映射【FBA仓库代码表】
+    # 核心二：精准映射【FBA仓库代码表】
     # ==========================================
     print("正在读取《FBA仓库代码表》匹配仓库地址...")
     try:
-        # ✨ 核心改动 2：仓库表也按字符串读取，保护邮编前导零
         df_warehouse = pd.read_excel(template_file, sheet_name='FBA仓库代码表', dtype=str)
         df_warehouse.columns = df_warehouse.columns.astype(str).str.strip()
 
@@ -350,18 +348,26 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
         print(f"⚠️ 《FBA仓库代码表》匹配跳过: {e}")
 
     # ==========================================
-    # 🚀 核心三：纯 Python 自动核算与格式化
+    # 核心三：纯 Python 自动核算与格式化
     # ==========================================
-    print("正在执行纯 Python 数值核算(毛重、体积)...")
+    print("正在执行纯 Python 数值核算(总数、毛重、体积)...")
     
-    # 将计算列强制转换为数字格式
-    required_calc_cols = ['单价', '单个净重', '单个毛重', '长', '宽', '高', '单箱数量', '总数']
+    # 强制数值化
+    required_calc_cols = ['单价', '单个净重', '单个毛重', '长', '宽', '高', '单箱数量', '总数', '箱数']
     for col in required_calc_cols:
         if col not in df_final.columns:
             df_final[col] = 0
         df_final[col] = pd.to_numeric(df_final[col], errors='coerce').fillna(0)
 
-    # 计算总价与重量
+    # 🎯 核心修复点：动态计算『总数』
+    # 如果不是混装，总数 = 箱数 * 单箱数量；如果是混装，保留上面已经赋予的总数
+    df_final['总数'] = np.where(
+        df_final['Is_Mixed'] == False, 
+        df_final['箱数'] * df_final['单箱数量'], 
+        df_final['总数']
+    )
+
+    # 级联计算总价与重量
     df_final['总价'] = df_final['总数'] * df_final['单价']
     df_final['单个毛重'] = np.where(df_final['单个毛重'] > 0, df_final['单个毛重'], df_final['单个净重'] + 0.1)
     df_final['总毛重'] = df_final['总数'] * df_final['单个毛重']
@@ -372,10 +378,9 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
     df_final['单个SKU体积'] = (df_final['长'] * df_final['宽'] * df_final['高']) / divisor / 100000
     df_final['体积'] = df_final['总数'] * df_final['单个SKU体积']
 
-    # ✨ 核心改动 3：海关单位代码终极护城河！强制补齐 3 位数
+    # 海关单位补齐
     for unit_col in ['申报单位', '法定单位']:
         if unit_col in df_final.columns:
-            # 如果单元格有值，强制转字符串 -> 截取掉可能存在的".0" -> 在前面补0直到满足3位
             df_final[unit_col] = df_final[unit_col].apply(
                 lambda x: str(x).split('.')[0].zfill(3) if pd.notna(x) and str(x).strip() not in ['', 'nan', 'None'] else x
             )
@@ -386,7 +391,10 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
         if col not in df_final.columns or pd.isna(df_final.loc[0, col]):
             df_final[col] = val
 
-    # 导出
+    # 清理中间辅助列，保持表结构干净
+    if 'Is_Mixed' in df_final.columns:
+        df_final = df_final.drop(columns=['Is_Mixed'])
+
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         df_final.to_excel(writer, index=False, sheet_name='明细')
         
