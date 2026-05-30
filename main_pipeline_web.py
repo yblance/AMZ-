@@ -385,7 +385,7 @@ def process_data_pure_python(stats_file, mixed_file, template_file, output_path)
     
     # 计算体积
     divisor = df_final['单箱数量'].replace(0, 1)
-    df_final['单个SKU体积'] = (df_final['长'] * df_final['宽'] * df_final['高']) / divisor / 100000
+    df_final['单个SKU体积'] = (df_final['长'] * df_final['宽'] * df_final['高']) / divisor / 1000000
     df_final['体积'] = df_final['总数'] * df_final['单个SKU体积']
 
     # 海关单位补齐
@@ -486,7 +486,7 @@ def generate_customs_docs(info_file_path, template_file_path, output_dir):
             # 这里的数值已由模块 4 算好：总毛重 = 总数 * (净重+0.1)
             ws_pk.cell(row=row, column=5, value=df_group.loc[i, '总毛重'])
             ws_pk.cell(row=row, column=6, value=df_group.loc[i, '总净重'])
-            # 这里的数值已由模块 4 算好：总体积 = 总数 * (长*宽*高/单箱数/100000)
+            # 这里的数值已由模块 4 算好：总体积 = 总数 * (长*宽*高/单箱数/1000000)
             ws_pk.cell(row=row, column=7, value=df_group.loc[i, '体积'])
 
         # 合计行 (14 + n)
